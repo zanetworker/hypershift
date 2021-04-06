@@ -80,7 +80,6 @@ hypershift destroy cluster \
   --aws-creds ~/.aws/credentials \
   --namespace clusters \
   --name example \
-  --base-domain hypershift.example.com
 ```
 
 ## How to add node pools to the example cluster
