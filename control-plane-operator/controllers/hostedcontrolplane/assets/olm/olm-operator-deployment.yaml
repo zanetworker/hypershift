@@ -1,0 +1,109 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: olm-operator
+  labels:
+    app: olm-operator
+  annotations:
+    include.release.openshift.io/self-managed-high-availability: "true"
+    include.release.openshift.io/single-node-developer: "true"
+spec:
+  strategy:
+    type: RollingUpdate
+  replicas: 1
+  selector:
+    matchLabels:
+      app: olm-operator
+  template:
+    metadata:
+      labels:
+        app: olm-operator
+      annotations:
+        target.workload.openshift.io/management: '{"effect": "PreferredDuringScheduling"}'
+{{ if .RestartDate }}
+        openshift.io/restartedAt: "{{ .RestartDate }}"
+{{ end }}
+    spec:
+      volumes:
+        - name: srv-cert
+          secret:
+            secretName: olm-operator-serving-cert
+        - name: client-ca
+          secret:
+            secretName: olm-client-ca
+        - name: kubeconfig
+          secret:
+            secretName: service-network-admin-kubeconfig
+      containers:
+        - name: olm-operator
+          volumeMounts:
+            - name: srv-cert
+              mountPath: "/srv-cert"
+              readOnly: true
+            - name: client-ca
+              mountPath: "/client-ca"
+              readOnly: true
+            - mountPath: /etc/openshift/kubeconfig
+              name: kubeconfig
+              readOnly: true
+          command:
+            - /bin/olm
+          args:
+            - --namespace
+            - $(OPERATOR_NAMESPACE)
+            - --writeStatusName
+            - operator-lifecycle-manager
+            - --writePackageServerStatusName=""
+            - --tls-cert
+            - /srv-cert/tls.crt
+            - --tls-key
+            - /srv-cert/tls.key
+            - --client-ca
+            - /client-ca/tls.crt
+          image: {{ imageFor "operator-lifecycle-manager" }}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8443
+              name: metrics
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8443
+              scheme: HTTPS
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8443
+              scheme: HTTPS
+          terminationMessagePolicy: FallbackToLogsOnError
+          env:
+            - name: OPERATOR_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: OPERATOR_NAME
+              value: olm-operator
+            - name: RELEASE_VERSION
+              value: {{ version "release" }}
+            - name: KUBECONFIG
+              value: /etc/openshift/kubeconfig/kubeconfig
+          resources:
+            requests:
+              cpu: 10m
+              memory: 160Mi
+      nodeSelector:
+        kubernetes.io/os: linux
+        node-role.kubernetes.io/master: ""
+      tolerations:
+        - effect: NoSchedule
+          key: node-role.kubernetes.io/master
+          operator: Exists
+        - effect: NoExecute
+          key: node.kubernetes.io/unreachable
+          operator: Exists
+          tolerationSeconds: 120
+        - effect: NoExecute
+          key: node.kubernetes.io/not-ready
+          operator: Exists
+          tolerationSeconds: 120
+      priorityClassName: hypershift-control-plane
